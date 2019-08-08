@@ -97,19 +97,27 @@ export class SolrDatasource {
         //fq=time:[2018-01-24T02:59:10.000Z TO 2018-01-24T14:59:10.000Z]
         var url = '/solr/' + target.collection + '/select?wt=json';
         //var rows = queryOptions.maxDataPoints || '100000';
-        var rows = 100000;
+        var rows = target.rows;
         var q = self.templateSrv.replace(target.target, queryOptions.scopedVars);
         q = self.queryBuilder(q);
+        var rawParams = target.rawParams ? target.rawParams.split('&') : [];
         var query = {
           //query: templateSrv.replace(target.target, queryOptions.scopedVars),
           fq: target.time + ':[' + queryOptions.range.from.toJSON() + ' TO ' + queryOptions.range.to.toJSON() + ']',
           q: q,
           fl: target.time + ',' + target.fields,
           rows: rows,
-          sort: target.time + ' desc'
+          sort: target.time + ' desc',
+          start: target.start
           //from: queryOptions.range.from.toJSON(),
           //to: queryOptions.range.to.toJSON(),
         };
+
+        rawParams.map(p => {
+          var tuple = p.split('=');
+          var val = tuple[1].replace('__START_TIME__', queryOptions.range.from.toJSON()).replace('__END_TIME__', queryOptions.range.to.toJSON());
+          query[tuple[0]] = val;
+        });
         if (target.groupEnabled === 'group') {
           query.group = true;
           query['group.field'] = target.groupByField;
@@ -183,6 +191,18 @@ export class SolrDatasource {
     return this.doRequest(requestOptions).then(this.mapToTextValue);
   }
 
+  listRawParams() {
+    return [
+      {
+        text: 'HeatMap Facet Query',
+        value: 'facet=true&json.facet={"heatMapFacet":{"numBuckets":true,"offset":0,"limit":10000,"type":"terms","field":"jobId","facet":{"Day0":{"type":"range","field":"timestamp","start":"__START_TIME__","end":"__END_TIME__","gap":"+1HOUR","facet":{"score":{"type":"query","q":"*:*","facet":{"score":"max(score_value)"}}}}}}}'
+      }, {
+        text: 'Get Raw Messages',
+        value: 'getRawMessages=true'
+      }
+    ];
+  }
+
   metricFindQuery(query) {
     //q=*:*&facet=true&facet.field=CR&facet.field=product_type&facet.field=provincia&wt=json&rows=0
     if (!this.solrCollection) {
@@ -236,24 +256,44 @@ export class SolrDatasource {
     var seriesList = [];
     var series = {};
     var self = this;
-    _(data.response.docs).forEach(function (item) {
-      for (var property in item) {
-        if (item.hasOwnProperty(property) && property != self.time) {
-          // do stuff
-          if (typeof (series[property]) === 'undefined') {
-            series[property] = [];
+
+    // Process heatmap facet response
+    if (data.facets && data.facets.heatMapFacet) {
+      var jobs = data.facets.heatMapFacet.buckets;
+      _(jobs).forEach(job => {
+        var dayBuckets = job.Day0.buckets;
+        var seriesData = [];
+        _(dayBuckets).forEach(bucket => {
+          if (bucket.score && bucket.score.score) {
+            seriesData.push([bucket.score.score, moment.utc(bucket.val).valueOf()]);
           }
-          var ts = moment.utc(item[self.time]).unix() * 1000;
-          series[property].push([item[property] || 0, ts]);
-        }
-      }
-    });
-    for (var property in series) {
-      seriesList.push({
-        target: property,
-        datapoints: series[property].reverse()
+        });
+        seriesList.push({
+          target: job.val,
+          datapoints: seriesData
+        });
       });
+    } else {
+      _(data.response.docs).forEach(function (item) {
+        for (var property in item) {
+          if (item.hasOwnProperty(property) && property != self.time) {
+            // do stuff
+            if (typeof (series[property]) === 'undefined') {
+              series[property] = [];
+            }
+            var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
+            series[property].push([item[property] || 0, ts]);
+          }
+        }
+      });
+      for (var property in series) {
+        seriesList.push({
+          target: property,
+          datapoints: series[property].reverse()
+        });
+      }
     }
+    
     return {
       data: seriesList
     };

@@ -37,6 +37,10 @@ export class SolrQueryCtrl extends QueryCtrl {
     this.target.groupLimit = this.target.groupLimit || 100000;
     this.target.collection = this.target.collection || this.datasource.solrCollection || '';
     this.target.solrCloudMode = this.target.solrCloudMode || this.datasource.solrCloudMode || true;
+
+    this.target.rawParams = this.target.rawParams || '';
+    this.target.numRows = this.target.numRows || 100;
+    this.target.start = this.target.start || 0;
   }
   getOptions(query) {
     return this.datasource.listCollections(query || '');
@@ -48,6 +52,10 @@ export class SolrQueryCtrl extends QueryCtrl {
 
   listFields(query, collection) {
     return this.datasource.listFields(query || '', collection);
+  }
+
+  listRawParams() {
+    return this.datasource.listRawParams();
   }
 
   toggleEditorMode() {
