@@ -101,6 +101,7 @@ export class SolrDatasource {
         var q = self.templateSrv.replace(target.target, queryOptions.scopedVars);
         q = self.queryBuilder(q);
         var rawParams = target.rawParams ? target.rawParams.split('&') : [];
+        var start = self.templateSrv.replace(target.start, queryOptions.scopedVars);
         var query = {
           //query: templateSrv.replace(target.target, queryOptions.scopedVars),
           fq: target.time + ':[' + queryOptions.range.from.toJSON() + ' TO ' + queryOptions.range.to.toJSON() + ']',
@@ -108,7 +109,7 @@ export class SolrDatasource {
           fl: target.time + ',' + target.fields,
           rows: rows,
           sort: target.time + ' desc',
-          start: target.start
+          start: start
           //from: queryOptions.range.from.toJSON(),
           //to: queryOptions.range.to.toJSON(),
         };
