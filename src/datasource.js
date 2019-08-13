@@ -135,7 +135,8 @@ export class SolrDatasource {
           params: query
         };
 
-        return self._request(requestOptions).then(_.bind(self.convertResponse, self));
+        
+        return self._request(requestOptions).then(_.bind(self.convertResponse, self, _, target.outputFormat));
       })
       .value();
 
@@ -203,6 +204,18 @@ export class SolrDatasource {
     ];
   }
 
+  listOutputFormats() {
+    return [
+      {
+        text: 'Table',
+        value: 'table'
+      }, {
+        text: 'Chart',
+        value: 'chart'
+      }
+    ];
+  }
+
   metricFindQuery(query) {
     //q=*:*&facet=true&facet.field=CR&facet.field=product_type&facet.field=provincia&wt=json&rows=0
     if (!this.solrCollection) {
@@ -251,14 +264,15 @@ export class SolrDatasource {
     }
   }
 
-  convertResponseUngrouped(response) {
+  convertResponseUngrouped(response, format) {
     var data = response.data;
-    var seriesList = [];
+    var seriesList;
     var series = {};
     var self = this;
 
     // Process heatmap facet response
     if (data.facets && data.facets.heatMapFacet) {
+      seriesList = [];
       var jobs = data.facets.heatMapFacet.buckets;
       _(jobs).forEach(job => {
         var dayBuckets = job.Day0.buckets;
@@ -273,38 +287,74 @@ export class SolrDatasource {
           datapoints: seriesData
         });
       });
-    } else {
+    } else if (format === 'table') { // Table
+      var columns = [];
+      var rows = [];
+      seriesList = {};
+      var index = 0;
       _(data.response.docs).forEach(function (item) {
+        var row = [];
         for (var property in item) {
-          if (item.hasOwnProperty(property) && property != self.time) {
-            // do stuff
-            if (typeof (series[property]) === 'undefined') {
-              series[property] = [];
+          // Set columns
+          if (index == 0 && item.hasOwnProperty(property)) {
+            if (property == self.time) {
+              columns.push({type: "time", text: 'Time'});
+            } else {
+              columns.push({type: "string", text: property});
             }
-            var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
-            series[property].push([item[property] || 0, ts]);
           }
+          // Set rows
+          if (property === self.time) {
+            var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
+            row.push(ts);
+          }
+          else {
+            row.push(item[property]);
+          }
+          
         }
+        index++;
+        rows.push(row);
       });
-      for (var property in series) {
-        seriesList.push({
-          target: property,
-          datapoints: series[property].reverse()
-        });
-      }
-    }
+      seriesList = {
+        type: "table",
+        columns: columns,
+        rows: rows
+      };
+    } else { // Charts
+      seriesList = [];
+     _(data.response.docs).forEach(function (item) {
+       for (var property in item) {
+         if (item.hasOwnProperty(property) && property != self.time) {
+           // do stuff
+           if (typeof (series[property]) === 'undefined') {
+             series[property] = [];
+           }
+           var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
+           series[property].push([item[property] || 0, ts]);
+         }
+       }
+     });
+     for (var property in series) {
+       seriesList.push({
+         target: property,
+         datapoints: series[property].reverse()
+       });
+     }
+   }
     
     return {
       data: seriesList
     };
   }
 
-  convertResponseGrouped(response) {
+  /*convertResponseGrouped(response) {
     var data = response.data;
     var groupBy = data.responseHeader.params['group.field'];
     var seriesList = [];
     // Recover the timestamp variable used for filtering
     var time = response.data.responseHeader.params.fl.split(',')[0];
+    var seriesData = [];
     _(data.grouped[groupBy].groups).forEach(function (item) {
       var target = item.groupValue || 'N/A';
       var datapoints = [];
@@ -324,9 +374,47 @@ export class SolrDatasource {
     return {
       data: seriesList
     };
+  }*/
+
+  convertResponseGrouped(response) {
+    var data = response.data;
+    var groupBy = data.responseHeader.params['group.field'];
+    var seriesList = [];
+    // Recover the timestamp variable used for filtering
+    var time = response.data.responseHeader.params.fl.split(',')[0];
+    var datapoints = {};
+    _(data.grouped[groupBy].groups).forEach(function (item) {
+      // var target = item.groupValue || 'N/A';
+      for (var i = 0; i < item.doclist.docs.length; i++) {
+        for (var property in item.doclist.docs[i]) {
+          if (item.doclist.docs[i].hasOwnProperty(property) && property != time) {
+            var t = moment.utc(item.doclist.docs[i][time]).unix() * 1000;
+            var key = item.groupValue + ':' + property;
+            if (datapoints[key] == undefined) {
+              datapoints[key] = [];
+            }
+            datapoints[key].push([item.doclist.docs[i][property], t]);
+          }
+        }
+      }
+      /*seriesList.push({
+        target: target,
+        datapoints: datapoints.reverse()
+      });*/
+      seriesList = [];
+      for (var prop in datapoints) {
+        seriesList.push({
+          target: prop,
+          datapoints: datapoints[prop].reverse()
+        });
+      }
+    });
+    return {
+      data: seriesList
+    };
   }
 
-  convertResponse(response) {
+  convertResponse(response, format) {
 
     var data = response.data;
 
@@ -335,7 +423,7 @@ export class SolrDatasource {
     }
 
     if (data.response) {
-      return this.convertResponseUngrouped(response);
+      return this.convertResponseUngrouped(response, format);
     }
 
     if (data.grouped) {

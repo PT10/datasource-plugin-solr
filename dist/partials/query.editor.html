@@ -51,4 +51,28 @@
 				ng-blur="ctrl.refresh()" />
 		</div>
 	</div>
+	<div class="gf-form-inline">
+		<div class="gf-form">
+				<label class="gf-form-label query-keyword width-10">Raw Parameters</label>
+				<!-- <input ng-model="ctrl.target.rawParams" class="gf-form-input input-medium width-16" placeholder="" data-min-length="0"> -->
+				<gf-form-dropdown model="ctrl.target.rawParams" allow-custom="true" lookup-text="true" 
+					css-class="gf-form-input width-16" get-options="ctrl.listRawParams()" on-change="ctrl.onChangeInternal()">
+				</gf-form-dropdown>
+		</div>
+		<div class="gf-form">
+				<label class="gf-form-label query-keyword width-10">Rows</label>
+				<input ng-model="ctrl.target.rows" type="number" class="gf-form-input input-medium width-16" placeholder="" data-min-length="0">
+		</div>
+		<div class="gf-form">
+			<label class="gf-form-label query-keyword width-10">Start</label>
+			<input ng-model="ctrl.target.start" type="number" class="gf-form-input input-medium width-16" placeholder="0" data-min-length="0">
+		</div>
+	</div>
+	<div class="gf-form-inline">
+		<label class="gf-form-label query-keyword width-10">Output format</label>
+		<!-- <input ng-model="ctrl.target.rawParams" class="gf-form-input input-medium width-16" placeholder="" data-min-length="0"> -->
+		<gf-form-dropdown model="ctrl.target.outputFormat" allow-custom="true" lookup-text="true" 
+			css-class="gf-form-input width-16" get-options="ctrl.listOutputFormats()" on-change="ctrl.onChangeInternal()">
+		</gf-form-dropdown>
+	</div>
 </query-editor-row>

@@ -122,19 +122,27 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
               //fq=time:[2018-01-24T02:59:10.000Z TO 2018-01-24T14:59:10.000Z]
               var url = '/solr/' + target.collection + '/select?wt=json';
               //var rows = queryOptions.maxDataPoints || '100000';
-              var rows = 100000;
+              var rows = target.rows;
               var q = self.templateSrv.replace(target.target, queryOptions.scopedVars);
               q = self.queryBuilder(q);
+              var rawParams = target.rawParams ? target.rawParams.split('&') : [];
               var query = {
                 //query: templateSrv.replace(target.target, queryOptions.scopedVars),
                 fq: target.time + ':[' + queryOptions.range.from.toJSON() + ' TO ' + queryOptions.range.to.toJSON() + ']',
                 q: q,
                 fl: target.time + ',' + target.fields,
                 rows: rows,
-                sort: target.time + ' desc'
+                sort: target.time + ' desc',
+                start: target.start
                 //from: queryOptions.range.from.toJSON(),
                 //to: queryOptions.range.to.toJSON(),
               };
+
+              rawParams.map(function (p) {
+                var tuple = p.split('=');
+                var val = tuple[1].replace('__START_TIME__', queryOptions.range.from.toJSON()).replace('__END_TIME__', queryOptions.range.to.toJSON());
+                query[tuple[0]] = val;
+              });
               if (target.groupEnabled === 'group') {
                 query.group = true;
                 query['group.field'] = target.groupByField;
@@ -152,7 +160,7 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
                 params: query
               };
 
-              return self._request(requestOptions).then(_.bind(self.convertResponse, self));
+              return self._request(requestOptions).then(_.bind(self.convertResponse, self, _, target.outputFormat));
             }).value();
 
             return this.$q.all(targetPromises).then(function (convertedResponses) {
@@ -211,6 +219,28 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
             return this.doRequest(requestOptions).then(this.mapToTextValue);
           }
         }, {
+          key: 'listRawParams',
+          value: function listRawParams() {
+            return [{
+              text: 'HeatMap Facet Query',
+              value: 'facet=true&json.facet={"heatMapFacet":{"numBuckets":true,"offset":0,"limit":10000,"type":"terms","field":"jobId","facet":{"Day0":{"type":"range","field":"timestamp","start":"__START_TIME__","end":"__END_TIME__","gap":"+1HOUR","facet":{"score":{"type":"query","q":"*:*","facet":{"score":"max(score_value)"}}}}}}}'
+            }, {
+              text: 'Get Raw Messages',
+              value: 'getRawMessages=true'
+            }];
+          }
+        }, {
+          key: 'listOutputFormats',
+          value: function listOutputFormats() {
+            return [{
+              text: 'Table',
+              value: 'table'
+            }, {
+              text: 'Chart',
+              value: 'chart'
+            }];
+          }
+        }, {
           key: 'metricFindQuery',
           value: function metricFindQuery(query) {
             //q=*:*&facet=true&facet.field=CR&facet.field=product_type&facet.field=provincia&wt=json&rows=0
@@ -263,29 +293,85 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
           }
         }, {
           key: 'convertResponseUngrouped',
-          value: function convertResponseUngrouped(response) {
+          value: function convertResponseUngrouped(response, format) {
             var data = response.data;
-            var seriesList = [];
+            var seriesList;
             var series = {};
             var self = this;
-            _(data.response.docs).forEach(function (item) {
-              for (var property in item) {
-                if (item.hasOwnProperty(property) && property != self.time) {
-                  // do stuff
-                  if (typeof series[property] === 'undefined') {
-                    series[property] = [];
+
+            // Process heatmap facet response
+            if (data.facets && data.facets.heatMapFacet) {
+              seriesList = [];
+              var jobs = data.facets.heatMapFacet.buckets;
+              _(jobs).forEach(function (job) {
+                var dayBuckets = job.Day0.buckets;
+                var seriesData = [];
+                _(dayBuckets).forEach(function (bucket) {
+                  if (bucket.score && bucket.score.score) {
+                    seriesData.push([bucket.score.score, moment.utc(bucket.val).valueOf()]);
                   }
-                  var ts = moment.utc(item[self.time]).unix() * 1000;
-                  series[property].push([item[property] || 0, ts]);
-                }
-              }
-            });
-            for (var property in series) {
-              seriesList.push({
-                target: property,
-                datapoints: series[property].reverse()
+                });
+                seriesList.push({
+                  target: job.val,
+                  datapoints: seriesData
+                });
               });
+            } else if (format === 'table') {
+              // Table
+              var columns = [];
+              var rows = [];
+              seriesList = {};
+              var index = 0;
+              _(data.response.docs).forEach(function (item) {
+                var row = [];
+                for (var property in item) {
+                  // Set columns
+                  if (index == 0 && item.hasOwnProperty(property)) {
+                    if (property == self.time) {
+                      columns.push({ type: "time", text: 'Time' });
+                    } else {
+                      columns.push({ type: "string", text: property });
+                    }
+                  }
+                  // Set rows
+                  if (property === self.time) {
+                    var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
+                    row.push(ts);
+                  } else {
+                    row.push(item[property]);
+                  }
+                }
+                index++;
+                rows.push(row);
+              });
+              seriesList = {
+                type: "table",
+                columns: columns,
+                rows: rows
+              };
+            } else {
+              // Charts
+              seriesList = [];
+              _(data.response.docs).forEach(function (item) {
+                for (var property in item) {
+                  if (item.hasOwnProperty(property) && property != self.time) {
+                    // do stuff
+                    if (typeof series[property] === 'undefined') {
+                      series[property] = [];
+                    }
+                    var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
+                    series[property].push([item[property] || 0, ts]);
+                  }
+                }
+              });
+              for (var property in series) {
+                seriesList.push({
+                  target: property,
+                  datapoints: series[property].reverse()
+                });
+              }
             }
+
             return {
               data: seriesList
             };
@@ -298,21 +384,32 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
             var seriesList = [];
             // Recover the timestamp variable used for filtering
             var time = response.data.responseHeader.params.fl.split(',')[0];
+            var datapoints = {};
             _(data.grouped[groupBy].groups).forEach(function (item) {
-              var target = item.groupValue || 'N/A';
-              var datapoints = [];
+              // var target = item.groupValue || 'N/A';
               for (var i = 0; i < item.doclist.docs.length; i++) {
                 for (var property in item.doclist.docs[i]) {
                   if (item.doclist.docs[i].hasOwnProperty(property) && property != time) {
                     var t = moment.utc(item.doclist.docs[i][time]).unix() * 1000;
-                    datapoints.push([item.doclist.docs[i][property], t]);
+                    var key = item.groupValue + ':' + property;
+                    if (datapoints[key] == undefined) {
+                      datapoints[key] = [];
+                    }
+                    datapoints[key].push([item.doclist.docs[i][property], t]);
                   }
                 }
               }
-              seriesList.push({
+              /*seriesList.push({
                 target: target,
                 datapoints: datapoints.reverse()
-              });
+              });*/
+              seriesList = [];
+              for (var prop in datapoints) {
+                seriesList.push({
+                  target: prop,
+                  datapoints: datapoints[prop].reverse()
+                });
+              }
             });
             return {
               data: seriesList
@@ -320,7 +417,7 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
           }
         }, {
           key: 'convertResponse',
-          value: function convertResponse(response) {
+          value: function convertResponse(response, format) {
 
             var data = response.data;
 
@@ -329,7 +426,7 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
             }
 
             if (data.response) {
-              return this.convertResponseUngrouped(response);
+              return this.convertResponseUngrouped(response, format);
             }
 
             if (data.grouped) {

@@ -41,6 +41,7 @@ export class SolrQueryCtrl extends QueryCtrl {
     this.target.rawParams = this.target.rawParams || '';
     this.target.numRows = this.target.numRows || 100;
     this.target.start = this.target.start || 0;
+    this.target.outputFormat = this.target.outputFormat || 'chart';
   }
   getOptions(query) {
     return this.datasource.listCollections(query || '');
@@ -56,6 +57,10 @@ export class SolrQueryCtrl extends QueryCtrl {
 
   listRawParams() {
     return this.datasource.listRawParams();
+  }
+
+  listOutputFormats() {
+    return this.datasource.listOutputFormats();
   }
 
   toggleEditorMode() {

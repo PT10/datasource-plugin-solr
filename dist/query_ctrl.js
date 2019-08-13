@@ -83,6 +83,11 @@ System.register(['app/plugins/sdk'], function (_export, _context) {
           _this.target.groupLimit = _this.target.groupLimit || 100000;
           _this.target.collection = _this.target.collection || _this.datasource.solrCollection || '';
           _this.target.solrCloudMode = _this.target.solrCloudMode || _this.datasource.solrCloudMode || true;
+
+          _this.target.rawParams = _this.target.rawParams || '';
+          _this.target.numRows = _this.target.numRows || 100;
+          _this.target.start = _this.target.start || 0;
+          _this.target.outputFormat = _this.target.outputFormat || 'chart';
           return _this;
         }
 
@@ -100,6 +105,16 @@ System.register(['app/plugins/sdk'], function (_export, _context) {
           key: 'listFields',
           value: function listFields(query, collection) {
             return this.datasource.listFields(query || '', collection);
+          }
+        }, {
+          key: 'listRawParams',
+          value: function listRawParams() {
+            return this.datasource.listRawParams();
+          }
+        }, {
+          key: 'listOutputFormats',
+          value: function listOutputFormats() {
+            return this.datasource.listOutputFormats();
           }
         }, {
           key: 'toggleEditorMode',
