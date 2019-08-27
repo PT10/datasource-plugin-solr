@@ -33,5 +33,6 @@ export {
   SolrConfigView as ConfigCtrl,
   SolrQueryCtrl as QueryCtrl,
   SolrMetricsQueryOptions as QueryOptionsCtrl,
-  SolrAnnotationsQueryCtrl as AnnotationsQueryCtrl
+  SolrAnnotationsQueryCtrl as AnnotationsQueryCtrl,
+  SolrQueryCtrl as ExploreLogsQueryField
 };

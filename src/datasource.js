@@ -97,11 +97,12 @@ export class SolrDatasource {
         //fq=time:[2018-01-24T02:59:10.000Z TO 2018-01-24T14:59:10.000Z]
         var url = '/solr/' + target.collection + '/select?wt=json';
         //var rows = queryOptions.maxDataPoints || '100000';
-        var rows = target.rows;
+        
         var q = self.templateSrv.replace(target.target, queryOptions.scopedVars);
         q = self.queryBuilder(q);
         var rawParams = target.rawParams ? target.rawParams.split('&') : [];
         var start = self.templateSrv.replace(target.start, queryOptions.scopedVars);
+        var rows = self.templateSrv.replace(target.rows, queryOptions.scopedVars) || 100;
         var query = {
           //query: templateSrv.replace(target.target, queryOptions.scopedVars),
           fq: target.time + ':[' + queryOptions.range.from.toJSON() + ' TO ' + queryOptions.range.to.toJSON() + ']',
@@ -113,6 +114,11 @@ export class SolrDatasource {
           //from: queryOptions.range.from.toJSON(),
           //to: queryOptions.range.to.toJSON(),
         };
+
+        if (target.solrCloudMode) {
+          query.startTime = queryOptions.range.from.toJSON();
+          query.endTime = queryOptions.range.to.toJSON();
+        }
 
         rawParams.map(p => {
           var tuple = p.split('=');
@@ -201,6 +207,9 @@ export class SolrDatasource {
       }, {
         text: 'Get Raw Messages',
         value: 'getRawMessages=true'
+      }, {
+        text: 'LineChart FacetQuery',
+        value: 'facet=true&json.facet={"lineChartFacet":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"jobId","facet":{"group":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"partition_fields","sort":"s desc","ss":"sum(s)","facet":{"s":"sum(score_value)","timestamp":{"type":"terms","limit":-1,"field":"timestamp","sort":"index","facet":{"actual":{"type":"terms","field":"actual_value"},"score":{"type":"terms","field":"score_value"},"anomaly":{"type":"terms","field":"is_anomaly"}}}}}}}}'
       }
     ];
   }
@@ -271,15 +280,60 @@ export class SolrDatasource {
     var series = {};
     var self = this;
 
+    // Process line chart facet response
+    if (data.facets && data.facets.lineChartFacet) {
+      seriesList = [];
+      var jobs = data.facets.lineChartFacet.buckets;
+      _(jobs).forEach(job => {
+        var jobId = job.val;
+        var partFields = job.group.buckets;
+        _(partFields).forEach(partField => {
+          var partFieldJson = JSON.parse(partField.val);
+          var jobIdWithPartField = jobId + '_' + partFieldJson.aggr_field;
+          var buckets = partField.timestamp.buckets;
+          var actualSeries = [];
+          var scoreSeries = [];
+          var anomalySeries = [];
+          _(buckets).forEach(timeBucket => {
+            var ts = moment.utc(timeBucket.val).valueOf();
+            var actual = timeBucket.actual.buckets[0].val;
+            var score = timeBucket.score.buckets[0].val;
+            var anomaly = timeBucket.anomaly.buckets[0].val;
+            if (score >= 1 && anomaly) {
+              anomaly = actual;
+            } else {
+              anomaly = null;
+              score = null;
+            }
+            actualSeries.push([actual, ts]);
+            scoreSeries.push([score, ts]);
+            anomalySeries.push([anomaly, ts]);
+          });
+
+          seriesList.push({
+            target: jobIdWithPartField + '_actual',
+            datapoints: actualSeries
+          });
+          seriesList.push({
+            target: jobIdWithPartField + '_score',
+            datapoints: scoreSeries
+          });
+          seriesList.push({
+            target: jobIdWithPartField + '_anomaly',
+            datapoints: anomalySeries
+          });
+        });
+      });
+    }
     // Process heatmap facet response
-    if (data.facets && data.facets.heatMapFacet) {
+    else if (data.facets && data.facets.heatMapFacet) {
       seriesList = [];
       var jobs = data.facets.heatMapFacet.buckets;
       _(jobs).forEach(job => {
         var dayBuckets = job.Day0.buckets;
         var seriesData = [];
         _(dayBuckets).forEach(bucket => {
-          if (bucket.score && bucket.score.score) {
+          if (bucket.score != null && bucket.score.score != null) {
             seriesData.push([bucket.score.score, moment.utc(bucket.val).valueOf()]);
           }
         });
@@ -287,6 +341,15 @@ export class SolrDatasource {
           target: job.val,
           datapoints: seriesData
         });
+      });
+
+      seriesList.sort((a, b) => {
+        var totalA = 0;
+        var totalB = 0;
+        a.datapoints.map(d => {totalA += d[0];});
+        b.datapoints.map(d => {totalB += d[0];});
+
+        return totalA - totalB;
       });
     } else if (format === 'table') { // Table
       var columns = [];
