@@ -31,7 +31,8 @@ export class SolrDatasource {
     this.$q = $q;
     this.templateSrv = templateSrv;
     this.backendSrv = backendSrv;
-    this.solrCollection = instanceSettings.jsonData.solrCollection;
+    this.solrAnomalyCollection = instanceSettings.jsonData.solrAnomalyCollection;
+    this.solrRawCollection = instanceSettings.jsonData.solrRawCollection;
     this.solrCloudMode = instanceSettings.jsonData.solrCloudMode;
 
     // Helper to make API requests to Solr. To avoid CORS issues, the requests may be proxied
@@ -204,12 +205,15 @@ export class SolrDatasource {
       {
         text: 'HeatMap Facet Query',
         value: 'facet=true&json.facet={"heatMapFacet":{"numBuckets":true,"offset":0,"limit":10000,"type":"terms","field":"jobId","facet":{"Day0":{"type":"range","field":"timestamp","start":"__START_TIME__","end":"__END_TIME__","gap":"+1HOUR","facet":{"score":{"type":"query","q":"*:*","facet":{"score":"max(score_value)"}}}}}}}'
+      },{
+        text: 'LineChart FacetQuery',
+        value: 'facet=true&json.facet={"lineChartFacet":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"jobId","facet":{"group":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"partition_fields","sort":"s desc","ss":"sum(s)","facet":{"s":"sum(score_value)","timestamp":{"type":"terms","limit":-1,"field":"timestamp","sort":"index","facet":{"actual":{"type":"terms","field":"actual_value"},"score":{"type":"terms","field":"score_value"},"anomaly":{"type":"terms","field":"is_anomaly"}}}}}}}}'
       }, {
         text: 'Get Raw Messages',
         value: 'getRawMessages=true'
       }, {
-        text: 'LineChart FacetQuery',
-        value: 'facet=true&json.facet={"lineChartFacet":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"jobId","facet":{"group":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"partition_fields","sort":"s desc","ss":"sum(s)","facet":{"s":"sum(score_value)","timestamp":{"type":"terms","limit":-1,"field":"timestamp","sort":"index","facet":{"actual":{"type":"terms","field":"actual_value"},"score":{"type":"terms","field":"score_value"},"anomaly":{"type":"terms","field":"is_anomaly"}}}}}}}}'
+        text: 'Get Num Messages',
+        value: 'getNumMessages'
       }
     ];
   }
@@ -228,16 +232,53 @@ export class SolrDatasource {
 
   metricFindQuery(query) {
     //q=*:*&facet=true&facet.field=CR&facet.field=product_type&facet.field=provincia&wt=json&rows=0
-    if (!this.solrCollection) {
+    if (!this.solrAnomalyCollection || !this.solrRawCollection) {
       return [];
     }
-    var facetFields = query;
-    var url = this.url + '/solr/' + this.solrCollection + '/select?q=*:*&facet=true&facet.field=' + facetFields + '&wt=json&rows=0';
 
-    return this.doRequest({
-      url: url,
-      method: 'GET',
-    }).then(this.mapToTextValue);
+    if (query.includes(',')) {
+      var queryParams = query.split(',');
+      query = queryParams[0];
+    }
+    
+    if (query == 'getNumResults') {
+      var searchQuery = _(this.templateSrv.variables).find(v => v.name == 'Search');
+      var url = this.url + '/solr/' + this.solrRawCollection + '/select?q=' + searchQuery.query + '&rows=0' +
+        '&fq=timestamp:[' + this.templateSrv.timeRange.from.toJSON() + ' TO ' + this.templateSrv.timeRange.to.toJSON() + ']';
+
+      return this.doRequest({
+        url: url,
+        method: 'GET',
+      }).then(data => {
+        var pageSize = _(this.templateSrv.variables).find(v => v.name == 'PageSize');
+        var arr = [...Array(Math.round(data.data.response.numFound/Number(pageSize.query))).keys()];
+        arr = arr.map(ele => {
+          return {
+            text: ele + 1,
+            value: ele
+          };
+        });
+        var firstNResults = arr.slice(0, 10);
+        var lastNResults = arr.splice(arr.length -11, arr.length - 1);
+
+        if (firstNResults.length == 0 && lastNResults.length == 0) {
+          return [{
+            text: 0,
+            value: 0
+          }];
+        }
+
+        return firstNResults.concat(lastNResults);
+      });
+    } else {
+      var facetFields = query;
+      var url = this.url + '/solr/' + this.solrAnomalyCollection + '/select?q=*:*&facet=true&facet.field=' + facetFields + '&wt=json&rows=0';
+
+      return this.doRequest({
+        url: url,
+        method: 'GET',
+      }).then(this.mapToTextValue);
+    }
   }
 
   mapToTextValue(result) {
