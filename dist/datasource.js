@@ -5,6 +5,18 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
 
   var _, $, moment, dateMath, _createClass, SolrDatasource;
 
+  function _toConsumableArray(arr) {
+    if (Array.isArray(arr)) {
+      for (var i = 0, arr2 = Array(arr.length); i < arr.length; i++) {
+        arr2[i] = arr[i];
+      }
+
+      return arr2;
+    } else {
+      return Array.from(arr);
+    }
+  }
+
   function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) {
       throw new TypeError("Cannot call a class as a function");
@@ -55,7 +67,8 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
           this.$q = $q;
           this.templateSrv = templateSrv;
           this.backendSrv = backendSrv;
-          this.solrCollection = instanceSettings.jsonData.solrCollection;
+          this.solrAnomalyCollection = instanceSettings.jsonData.solrAnomalyCollection;
+          this.solrRawCollection = instanceSettings.jsonData.solrRawCollection;
           this.solrCloudMode = instanceSettings.jsonData.solrCloudMode;
 
           // Helper to make API requests to Solr. To avoid CORS issues, the requests may be proxied
@@ -122,21 +135,27 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
               //fq=time:[2018-01-24T02:59:10.000Z TO 2018-01-24T14:59:10.000Z]
               var url = '/solr/' + target.collection + '/select?wt=json';
               //var rows = queryOptions.maxDataPoints || '100000';
-              var rows = target.rows;
+
               var q = self.templateSrv.replace(target.target, queryOptions.scopedVars);
               q = self.queryBuilder(q);
               var rawParams = target.rawParams ? target.rawParams.split('&') : [];
+              var start = self.templateSrv.replace(target.start, queryOptions.scopedVars);
+              var sort = self.templateSrv.replace(target.sort, queryOptions.scopedVars) || target.time;
+              var sortOrder = self.templateSrv.replace(target.sortOrder, queryOptions.scopedVars) || 'desc';
+              var rows = self.templateSrv.replace(target.rows, queryOptions.scopedVars) || 100;
               var query = {
-                //query: templateSrv.replace(target.target, queryOptions.scopedVars),
                 fq: target.time + ':[' + queryOptions.range.from.toJSON() + ' TO ' + queryOptions.range.to.toJSON() + ']',
                 q: q,
                 fl: target.time + ',' + target.fields,
                 rows: rows,
-                sort: target.time + ' desc',
-                start: target.start
-                //from: queryOptions.range.from.toJSON(),
-                //to: queryOptions.range.to.toJSON(),
+                sort: sort + ' ' + sortOrder,
+                start: start
               };
+
+              if (target.solrCloudMode) {
+                query.startTime = queryOptions.range.from.toJSON();
+                query.endTime = queryOptions.range.to.toJSON();
+              }
 
               rawParams.map(function (p) {
                 var tuple = p.split('=');
@@ -225,6 +244,9 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
               text: 'HeatMap Facet Query',
               value: 'facet=true&json.facet={"heatMapFacet":{"numBuckets":true,"offset":0,"limit":10000,"type":"terms","field":"jobId","facet":{"Day0":{"type":"range","field":"timestamp","start":"__START_TIME__","end":"__END_TIME__","gap":"+1HOUR","facet":{"score":{"type":"query","q":"*:*","facet":{"score":"max(score_value)"}}}}}}}'
             }, {
+              text: 'LineChart FacetQuery',
+              value: 'facet=true&json.facet={"lineChartFacet":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"jobId","facet":{"group":{"numBuckets":true,"offset":0,"limit":10,"type":"terms","field":"partition_fields","sort":"s desc","ss":"sum(s)","facet":{"s":"sum(score_value)","timestamp":{"type":"terms","limit":-1,"field":"timestamp","sort":"index","facet":{"actual":{"type":"terms","field":"actual_value"},"score":{"type":"terms","field":"score_value"},"anomaly":{"type":"terms","field":"is_anomaly"}}}}}}}}'
+            }, {
               text: 'Get Raw Messages',
               value: 'getRawMessages=true'
             }];
@@ -238,22 +260,67 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
             }, {
               text: 'Chart',
               value: 'chart'
+            }, {
+              text: 'Single',
+              value: 'single'
             }];
           }
         }, {
           key: 'metricFindQuery',
           value: function metricFindQuery(query) {
+            var _this = this;
+
             //q=*:*&facet=true&facet.field=CR&facet.field=product_type&facet.field=provincia&wt=json&rows=0
-            if (!this.solrCollection) {
+            if (!this.solrAnomalyCollection || !this.solrRawCollection) {
               return [];
             }
-            var facetFields = query;
-            var url = this.url + '/solr/' + this.solrCollection + '/select?q=*:*&facet=true&facet.field=' + facetFields + '&wt=json&rows=0';
 
-            return this.doRequest({
-              url: url,
-              method: 'GET'
-            }).then(this.mapToTextValue);
+            if (query.includes(',')) {
+              var queryParams = query.split(',');
+              query = queryParams[0];
+            }
+
+            if (query == 'getNumResults') {
+              var searchQuery = _(this.templateSrv.variables).find(function (v) {
+                return v.name == 'Search';
+              });
+              var url = this.url + '/solr/' + this.solrRawCollection + '/select?q=' + searchQuery.query + '&rows=0' + '&fq=timestamp:[' + this.templateSrv.timeRange.from.toJSON() + ' TO ' + this.templateSrv.timeRange.to.toJSON() + ']';
+
+              return this.doRequest({
+                url: url,
+                method: 'GET'
+              }).then(function (data) {
+                var pageSize = _(_this.templateSrv.variables).find(function (v) {
+                  return v.name == 'PageSize';
+                });
+                var arr = [].concat(_toConsumableArray(Array(Math.round(data.data.response.numFound / Number(pageSize.query))).keys()));
+                arr = arr.map(function (ele) {
+                  return {
+                    text: ele + 1,
+                    value: ele
+                  };
+                });
+                var firstNResults = arr.slice(0, 10);
+                var lastNResults = arr.splice(arr.length - 11, arr.length - 1);
+
+                if (firstNResults.length == 0 && lastNResults.length == 0) {
+                  return [{
+                    text: 0,
+                    value: 0
+                  }];
+                }
+
+                return firstNResults.concat(lastNResults);
+              });
+            } else {
+              var facetFields = query;
+              var url = this.url + '/solr/' + this.solrAnomalyCollection + '/select?q=*:*&facet=true&facet.field=' + facetFields + '&wt=json&rows=0';
+
+              return this.doRequest({
+                url: url,
+                method: 'GET'
+              }).then(this.mapToTextValue);
+            }
           }
         }, {
           key: 'mapToTextValue',
@@ -299,78 +366,142 @@ System.register(['lodash', 'jquery', 'moment', 'app/core/utils/datemath'], funct
             var series = {};
             var self = this;
 
-            // Process heatmap facet response
-            if (data.facets && data.facets.heatMapFacet) {
+            // Process line chart facet response
+            if (data.facets && data.facets.lineChartFacet) {
               seriesList = [];
-              var jobs = data.facets.heatMapFacet.buckets;
+              var jobs = data.facets.lineChartFacet.buckets;
               _(jobs).forEach(function (job) {
-                var dayBuckets = job.Day0.buckets;
-                var seriesData = [];
-                _(dayBuckets).forEach(function (bucket) {
-                  if (bucket.score && bucket.score.score) {
-                    seriesData.push([bucket.score.score, moment.utc(bucket.val).valueOf()]);
-                  }
-                });
-                seriesList.push({
-                  target: job.val,
-                  datapoints: seriesData
-                });
-              });
-            } else if (format === 'table') {
-              // Table
-              var columns = [];
-              var rows = [];
-              seriesList = {};
-              var index = 0;
-              _(data.response.docs).forEach(function (item) {
-                var row = [];
-                for (var property in item) {
-                  // Set columns
-                  if (index == 0 && item.hasOwnProperty(property)) {
-                    if (property == self.time) {
-                      columns.push({ type: "time", text: 'Time' });
+                var jobId = job.val;
+                var partFields = job.group.buckets;
+                _(partFields).forEach(function (partField) {
+                  var partFieldJson = JSON.parse(partField.val);
+                  var jobIdWithPartField = jobId + '_' + partFieldJson.aggr_field;
+                  var buckets = partField.timestamp.buckets;
+                  var actualSeries = [];
+                  var scoreSeries = [];
+                  var anomalySeries = [];
+                  _(buckets).forEach(function (timeBucket) {
+                    var ts = moment.utc(timeBucket.val).valueOf();
+                    var actual = timeBucket.actual.buckets[0].val;
+                    var score = timeBucket.score.buckets[0].val;
+                    var anomaly = timeBucket.anomaly.buckets[0].val;
+                    if (score >= 1 && anomaly) {
+                      anomaly = actual;
                     } else {
-                      columns.push({ type: "string", text: property });
+                      anomaly = null;
+                      score = null;
                     }
-                  }
-                  // Set rows
-                  if (property === self.time) {
-                    var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
-                    row.push(ts);
-                  } else {
-                    row.push(item[property]);
-                  }
-                }
-                index++;
-                rows.push(row);
-              });
-              seriesList = {
-                type: "table",
-                columns: columns,
-                rows: rows
-              };
-            } else {
-              // Charts
-              seriesList = [];
-              _(data.response.docs).forEach(function (item) {
-                for (var property in item) {
-                  if (item.hasOwnProperty(property) && property != self.time) {
-                    // do stuff
-                    if (typeof series[property] === 'undefined') {
-                      series[property] = [];
-                    }
-                    var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
-                    series[property].push([item[property] || 0, ts]);
-                  }
-                }
-              });
-              for (var property in series) {
-                seriesList.push({
-                  target: property,
-                  datapoints: series[property].reverse()
+                    actualSeries.push([actual, ts]);
+                    scoreSeries.push([score, ts]);
+                    anomalySeries.push([anomaly, ts]);
+                  });
+
+                  seriesList.push({
+                    target: jobIdWithPartField + '_actual',
+                    datapoints: actualSeries
+                  });
+                  seriesList.push({
+                    target: jobIdWithPartField + '_score',
+                    datapoints: scoreSeries
+                  });
+                  seriesList.push({
+                    target: jobIdWithPartField + '_anomaly',
+                    datapoints: anomalySeries
+                  });
                 });
-              }
+              });
             }
+            // Process heatmap facet response
+            else if (data.facets && data.facets.heatMapFacet) {
+                seriesList = [];
+                var jobs = data.facets.heatMapFacet.buckets;
+                _(jobs).forEach(function (job) {
+                  var dayBuckets = job.Day0.buckets;
+                  var seriesData = [];
+                  _(dayBuckets).forEach(function (bucket) {
+                    if (bucket.score != null && bucket.score.score != null) {
+                      seriesData.push([bucket.score.score, moment.utc(bucket.val).valueOf()]);
+                    }
+                  });
+                  seriesList.push({
+                    target: job.val,
+                    datapoints: seriesData
+                  });
+                });
+
+                seriesList.sort(function (a, b) {
+                  var totalA = 0;
+                  var totalB = 0;
+                  a.datapoints.map(function (d) {
+                    totalA += d[0];
+                  });
+                  b.datapoints.map(function (d) {
+                    totalB += d[0];
+                  });
+
+                  return totalA - totalB;
+                });
+              } else if (format === 'table') {
+                // Table
+                var columns = [];
+                var rows = [];
+                seriesList = {};
+                var index = 0;
+                _(data.response.docs).forEach(function (item) {
+                  var row = [];
+                  for (var property in item) {
+                    // Set columns
+                    if (index == 0 && item.hasOwnProperty(property)) {
+                      if (property == self.time) {
+                        columns.push({ type: "time", text: 'Time' });
+                      } else {
+                        columns.push({ type: "string", text: property });
+                      }
+                    }
+                    // Set rows
+                    if (property === self.time) {
+                      var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
+                      row.push(ts);
+                    } else {
+                      row.push(item[property]);
+                    }
+                  }
+                  index++;
+                  rows.push(row);
+                });
+                seriesList = {
+                  type: "table",
+                  columns: columns,
+                  rows: rows
+                };
+              } else if (format === 'single') {
+                seriesList = [];
+                seriesList.push({
+                  target: 'Number of docs',
+                  datapoints: [[data.response.numFound, moment.utc().valueOf()]]
+                });
+              } else {
+                // Charts
+                seriesList = [];
+                _(data.response.docs).forEach(function (item) {
+                  for (var property in item) {
+                    if (item.hasOwnProperty(property) && property != self.time) {
+                      // do stuff
+                      if (typeof series[property] === 'undefined') {
+                        series[property] = [];
+                      }
+                      var ts = moment.utc(item[self.time]).valueOf(); //.unix() * 1000;
+                      series[property].push([item[property] || 0, ts]);
+                    }
+                  }
+                });
+                for (var property in series) {
+                  seriesList.push({
+                    target: property,
+                    datapoints: series[property].reverse()
+                  });
+                }
+              }
 
             return {
               data: seriesList

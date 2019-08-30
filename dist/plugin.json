@@ -31,5 +31,6 @@
   "staticRoot": ".",
 
   "metrics": true,
-  "annotations": true
+  "annotations": true,
+  "logs": true
 }

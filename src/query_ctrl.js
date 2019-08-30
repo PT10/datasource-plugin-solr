@@ -41,6 +41,8 @@ export class SolrQueryCtrl extends QueryCtrl {
     this.target.rawParams = this.target.rawParams || '';
     this.target.numRows = this.target.numRows || 100;
     this.target.start = this.target.start || 0;
+    this.target.sort = this.target.sort || 'timestamp';
+    this.target.sortOrder = this.target.sortOrder || 'desc';
     this.target.outputFormat = this.target.outputFormat || 'chart';
   }
   getOptions(query) {

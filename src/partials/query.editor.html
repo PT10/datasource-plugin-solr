@@ -69,6 +69,14 @@
 		</div>
 	</div>
 	<div class="gf-form-inline">
+		<div class="gf-form">
+			<label class="gf-form-label query-keyword width-10">Sort</label>
+			<input ng-model="ctrl.target.sort" type="text" class="gf-form-input input-medium width-16" placeholder="0" data-min-length="0">
+		</div>
+		<div class="gf-form">
+				<label class="gf-form-label query-keyword width-10">Order</label>
+				<input ng-model="ctrl.target.sortOrder" type="text" class="gf-form-input input-medium width-16" placeholder="0" data-min-length="0">
+			</div>
 		<label class="gf-form-label query-keyword width-10">Output format</label>
 		<!-- <input ng-model="ctrl.target.rawParams" class="gf-form-input input-medium width-16" placeholder="" data-min-length="0"> -->
 		<gf-form-dropdown model="ctrl.target.outputFormat" allow-custom="true" lookup-text="true" 

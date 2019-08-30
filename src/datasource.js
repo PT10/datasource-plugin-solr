@@ -103,17 +103,16 @@ export class SolrDatasource {
         q = self.queryBuilder(q);
         var rawParams = target.rawParams ? target.rawParams.split('&') : [];
         var start = self.templateSrv.replace(target.start, queryOptions.scopedVars);
+        var sort = self.templateSrv.replace(target.sort, queryOptions.scopedVars) || target.time;
+        var sortOrder = self.templateSrv.replace(target.sortOrder, queryOptions.scopedVars) || 'desc';
         var rows = self.templateSrv.replace(target.rows, queryOptions.scopedVars) || 100;
         var query = {
-          //query: templateSrv.replace(target.target, queryOptions.scopedVars),
           fq: target.time + ':[' + queryOptions.range.from.toJSON() + ' TO ' + queryOptions.range.to.toJSON() + ']',
           q: q,
           fl: target.time + ',' + target.fields,
           rows: rows,
-          sort: target.time + ' desc',
+          sort: sort + ' ' + sortOrder,
           start: start
-          //from: queryOptions.range.from.toJSON(),
-          //to: queryOptions.range.to.toJSON(),
         };
 
         if (target.solrCloudMode) {
@@ -211,9 +210,6 @@ export class SolrDatasource {
       }, {
         text: 'Get Raw Messages',
         value: 'getRawMessages=true'
-      }, {
-        text: 'Get Num Messages',
-        value: 'getNumMessages'
       }
     ];
   }
@@ -226,6 +222,9 @@ export class SolrDatasource {
       }, {
         text: 'Chart',
         value: 'chart'
+      }, {
+        text: 'Single',
+        value: 'single'
       }
     ];
   }
@@ -240,7 +239,7 @@ export class SolrDatasource {
       var queryParams = query.split(',');
       query = queryParams[0];
     }
-    
+
     if (query == 'getNumResults') {
       var searchQuery = _(this.templateSrv.variables).find(v => v.name == 'Search');
       var url = this.url + '/solr/' + this.solrRawCollection + '/select?q=' + searchQuery.query + '&rows=0' +
@@ -426,6 +425,12 @@ export class SolrDatasource {
         columns: columns,
         rows: rows
       };
+    } else if (format === 'single') {
+      seriesList = [];
+      seriesList.push({
+        target:'Number of docs', 
+        datapoints: [[data.response.numFound, moment.utc().valueOf() ]]
+      });
     } else { // Charts
       seriesList = [];
      _(data.response.docs).forEach(function (item) {

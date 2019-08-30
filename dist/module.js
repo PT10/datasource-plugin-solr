@@ -45,6 +45,8 @@ System.register(['./datasource', './query_ctrl'], function (_export, _context) {
       _export('QueryOptionsCtrl', SolrMetricsQueryOptions);
 
       _export('AnnotationsQueryCtrl', SolrAnnotationsQueryCtrl);
+
+      _export('ExploreLogsQueryField', SolrQueryCtrl);
     }
   };
 });

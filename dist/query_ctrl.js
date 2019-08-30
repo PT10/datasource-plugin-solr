@@ -87,6 +87,8 @@ System.register(['app/plugins/sdk'], function (_export, _context) {
           _this.target.rawParams = _this.target.rawParams || '';
           _this.target.numRows = _this.target.numRows || 100;
           _this.target.start = _this.target.start || 0;
+          _this.target.sort = _this.target.sort || 'timestamp';
+          _this.target.sortOrder = _this.target.sortOrder || 'desc';
           _this.target.outputFormat = _this.target.outputFormat || 'chart';
           return _this;
         }
